@@ -192,6 +192,7 @@ class ADRModel(object):
     
     
     
+    #Scans entire dataset 
     def getSimilarWords(self, symptom, meanEmb, similarityThreshold = 0.3):
         #print('getSimilarWords', symptom)
         #print('meanEmb:', meanEmb.shape)
@@ -224,17 +225,24 @@ class ADRModel(object):
             arrA = torch.from_numpy(meanEmb.reshape(1,-1)).to(device).type(torch.cuda.FloatTensor)
             arrB = torch.from_numpy(embList).to(device).type(torch.cuda.FloatTensor)
 
-            sim = cos(arrA,arrB).cpu().numpy().reshape(-1)
-	    
-	    maxSim = torch.max(sim).detach().cpu().numpy().reshape(1, -1)[0][0]
-	    if self.df.iloc[i]['similarity'] < maxSim:
-	    	self.df.iloc[i]['similarity'] = maxSim
-		maxIndex = torch.argmax(sim)
-		self.df.iloc[i]['nearest_token'] = tokenList[maxIndex]
-
+            sim = cos(arrA,arrB)
+            
             del arrA
             del arrB
+            
+            #stores Maximum Similarity
+            maxSim = torch.max(sim).detach().cpu().numpy().reshape(1, -1)[0][0]
+            
+            
+            #if curr similarity of the tweets is less than max of similarity of any of its tokens
+            if self.df.iloc[i]['similarity'] < maxSim:
+                # Update similarity of tweet and nearest_token that caused the result
+                self.df.iloc[i]['similarity'] = maxSim
+                maxIndex = torch.argmax(sim)
+                self.df.iloc[i]['nearest_token'] = tokenList[maxIndex]
 
+            
+            sim = sim.cpu().numpy().reshape(-1)
             sim = np.round(sim,4)
             
             index= np.where([sim> similarityThreshold])[1]
@@ -248,8 +256,6 @@ class ADRModel(object):
             tokenList_ = tokenList[index]
             IDList_ = IDList[index]
             simList = sim[index]
-		
-	    maxSim = torch.max(sim).detach().cpu().numpy().reshape(1, -1)[0][0]
 
             out = [(lemmatizer.lemmatize(x),y,z) for x,y,z in zip(tokenList_, simList, IDList_)]
 
@@ -264,6 +270,9 @@ class ADRModel(object):
         
     
     
+    # Input: list of tuples of form (token, sim, ID)
+    # Output: outputDf dataframe of top k tokens. 
+    # outputDf.columns = ['word','counts','mean_sim']
     def getOutput(self, out):
     
         output = out
@@ -314,7 +323,7 @@ class ADRModel(object):
     
     def exploreNode(self, word, depth, maxDepth = 3, topk = 5):
 
-    
+        
         self.graph.addNode(word,0,depth)
 
         print(f"Depth : {depth} Exploring {word}")
@@ -328,7 +337,7 @@ class ADRModel(object):
         token = self.tokenizer.encode(keyWord)[1]
 
         if self.graph[word].vector is None:
-
+            #Word is not seen before
             inEdgeList = self.graph[word].edges_in
 
             if len(inEdgeList)==0:
@@ -342,7 +351,8 @@ class ADRModel(object):
                 textIDList = list(set(list(itertools.chain.from_iterable(textIDList))))
 
             
-            #embList will have list of embedding of keyword AND msgList will have corresonding tweet
+            # embList will have list of embedding of keyword AND 
+            # msgList will have corresonding tweet
             embList, msgList = self.getSymptomEmbedding(keyWord, subset = textIDList)
 
             meanEmb = np.array(embList)
@@ -379,18 +389,17 @@ class ADRModel(object):
         embList_ = meanEmb
 
         if self.useMasterEmb:
-            
+            # finalEmb is updated
             finalEmb = self.masterContrib*self.masterEmb + (1 - self.masterContrib)*meanEmb
            
-	#out = tokenList, simList, IDList
+        #out = tokenList, simList, IDList
             out = self.getSimilarWords( symptom_, finalEmb , similarityThreshold = 0.3)
         else:
-            out = self.getSimilarWords( symptom_, meanEmb, similarityThreshold = 0.3)
-        
-        #out contains
+            out = self.getSimilarWords( symptom_, meanEmb, similarityThreshold = 0.3)        
+        #out contains list of tuples of form (token, sim, ID)
         
         outputDf, outMap, outMap_ = self.getOutput(out)
-	#outputDf.columns = ['word','counts','mean_sim']	
+        #outputDf.columns = ['word','counts','mean_sim']	
 
         outputDf = outputDf[outputDf.word!=keyWord] #Words that are not current keyWord
     #     outputDf = outputDf[~outputDf.word.isin(list(graph.wordMap.keys()))]
@@ -398,10 +407,10 @@ class ADRModel(object):
         outputDf = outputDf.head(topk)
 
         outputDf = outputDf[outputDf.mean_sim>0.4]
-
+        
+        # printing starts
         print(outputDf)
         print("-----------------------")
-
         for i in range(len(outputDf)):
 
             word = outputDf.iloc[i]['word']
@@ -415,24 +424,28 @@ class ADRModel(object):
             self.graph[word].textIDList.append(textIDs)
             self.graph.addEdge(keyWord, word, numCount, weight, textIDs)
 
+            #word is already explored
             if word in wordList:
                 continue
 
 #             if "#" in word:
 #                 continue
 
-
+            
+            # Add to Queue for Exploring BFS
             self.q.append((word, depth+1))
+        # printing starts
             
-            
+    #Training Starts here
     def trainModel(self, maxDepth = 3, topk = 5):
         
         currDepth = 0
         
+        #While Queue is NOT empty
         while len(self.q)>0:
             token, depth = self.q.popleft()
             
-            if depth> currDepth:
+            if depth > currDepth:
                 
                 if self.saveEveryDepth:
                     filepath = os.path.join( self.modelOutputFolder, f"depth_{currDepth}.pkl")
@@ -442,6 +455,7 @@ class ADRModel(object):
                 self.getMeanEmbedding(depth-1)
                 currDepth += 1
             
+            #exploring current node
             self.exploreNode(word = token, depth = depth, maxDepth=maxDepth, topk=topk)
         
         #Saving final model

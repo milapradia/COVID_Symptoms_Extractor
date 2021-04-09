@@ -57,7 +57,7 @@ import sys
 
 batchNum = str(sys.argv[1])
 covidData = 'data/'
-df = pd.read_csv(os.path.join(covidData, 'batch_' + batchNum + '.csv'), nrows = 10000)
+df = pd.read_csv(os.path.join(covidData, 'batch_' + str(batchNum) + '.csv'), sep='\t')
 
 df = df[['message_id','user_id','message']]
 
@@ -93,7 +93,7 @@ q = deque()
 q.append(('cough',0))
 
 ADR = ADRModel(df, model, tokenizer, graph, outputFolder, combinedOutputFolder, modelOutputFolder = modelFolder, 
-               queue = q,  useMasterEmb=True, masterContrib=0.4, numThreshold=1000000, saveEveryDepth = True)
+               queue = q,  useMasterEmb=True, masterContrib=0.4, numThreshold=10000, saveEveryDepth = True)
 
 
 startTime = time.time()
